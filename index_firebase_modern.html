@@ -447,6 +447,23 @@ footer strong{color:var(--text);font-family:"Space Grotesk"}
     appId: "GANTI_DENGAN_APP_ID"
   };
 
+  const firebaseConfigReady = Object.values(firebaseConfig).every(
+    value => value && !String(value).startsWith("GANTI_DENGAN_")
+  );
+
+  if (!firebaseConfigReady) {
+    console.error("Firebase belum dikonfigurasi:", firebaseConfig);
+    const warning = document.createElement("div");
+    warning.style.cssText =
+      "position:fixed;left:16px;right:16px;bottom:16px;z-index:9999;" +
+      "padding:15px 18px;background:#fff1f0;color:#b42318;" +
+      "border:1px solid #fecdca;border-radius:14px;font:600 13px system-ui;" +
+      "box-shadow:0 15px 40px rgba(0,0,0,.12)";
+    warning.textContent =
+      "Firebase belum dikonfigurasi. Isi firebaseConfig dengan konfigurasi Web App Firebase kamu.";
+    document.body.appendChild(warning);
+  }
+
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
   const storage = getStorage(app);

@@ -426,7 +426,7 @@ footer strong{color:var(--text);font-family:"Space Grotesk"}
   import {
     getStorage,
     ref,
-    uploadBytes,
+    uploadBytesResumable,
     getDownloadURL,
     deleteObject
   } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-storage.js";
@@ -721,6 +721,256 @@ footer strong{color:var(--text);font-family:"Space Grotesk"}
 
   lightbox?.addEventListener("click", event => {
     if (event.target === lightbox) closeLightbox();
+  });
+
+  /*
+     ============================================================
+     UPLOAD — VERSI DIPERBAIKI
+     ============================================================
+     - uploadBytesResumable: lebih stabil untuk file besar.
+     - Foto otomatis diperkecil/dikompres di browser.
+     - Maksimal 3 upload berjalan bersamaan.
+     - Progress upload ditampilkan.
+  */
+
+  const MAX_FILE_SIZE = 200 * 1024 * 1024;
+  const MAX_IMAGE_DIMENSION = 1920;
+  const IMAGE_QUALITY = 0.82;
+  const MAX_PARALLEL_UPLOADS = 3;
+
+  function formatBytes(bytes) {
+    if (!bytes) return "0 B";
+    const units = ["B", "KB", "MB", "GB"];
+    const i = Math.min(
+      units.length - 1,
+      Math.floor(Math.log(bytes) / Math.log(1024))
+    );
+    return `${(bytes / Math.pow(1024, i)).toFixed(i ? 1 : 0)} ${units[i]}`;
+  }
+
+  function setUploadToast(text) {
+    const toast = document.getElementById("uploadToast");
+    toast.style.display = "block";
+    toast.textContent = text;
+  }
+
+  async function compressImage(file) {
+    if (!file.type.startsWith("image/")) return file;
+    if (file.type === "image/gif" || file.type === "image/svg+xml") return file;
+
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(
+      1,
+      MAX_IMAGE_DIMENSION / bitmap.width,
+      MAX_IMAGE_DIMENSION / bitmap.height
+    );
+
+    if (scale === 1 && file.size <= 1.5 * 1024 * 1024) {
+      bitmap.close();
+      return file;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+
+    const ctx = canvas.getContext("2d", { alpha: false });
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+
+    const blob = await new Promise(resolve =>
+      canvas.toBlob(resolve, "image/jpeg", IMAGE_QUALITY)
+    );
+
+    if (!blob) return file;
+
+    return new File(
+      [blob],
+      file.name.replace(/\.[^.]+$/, "") + ".jpg",
+      { type: "image/jpeg", lastModified: Date.now() }
+    );
+  }
+
+  function uploadFileToStorage(storageRef, file, onProgress) {
+    return new Promise((resolve, reject) => {
+      const task = uploadBytesResumable(storageRef, file, {
+        contentType: file.type,
+        cacheControl: "public,max-age=31536000,immutable"
+      });
+
+      task.on(
+        "state_changed",
+        snapshot => {
+          const percent = Math.round(
+            (snapshot.bytesTransferred / snapshot.totalBytes) * 100
+          );
+          onProgress(percent);
+        },
+        reject,
+        async () => {
+          try {
+            resolve(await getDownloadURL(task.snapshot.ref));
+          } catch (error) {
+            reject(error);
+          }
+        }
+      );
+    });
+  }
+
+  async function uploadMedia(file, index, total) {
+    const isPhoto = file.type.startsWith("image/");
+    const isVideo = file.type.startsWith("video/");
+
+    if (!isPhoto && !isVideo) {
+      throw new Error(`${file.name} bukan foto/video yang valid.`);
+    }
+
+    if (file.size > MAX_FILE_SIZE) {
+      throw new Error(`${file.name} melebihi batas ${formatBytes(MAX_FILE_SIZE)}.`);
+    }
+
+    const originalSize = file.size;
+    const preparedFile = isPhoto ? await compressImage(file) : file;
+    const type = isPhoto ? "photo" : "video";
+
+    const safeBaseName = preparedFile.name
+      .replace(/[^\w.\- ]+/g, "_")
+      .replace(/\s+/g, "_");
+
+    const safeName = `${Date.now()}_${crypto.randomUUID()}_${safeBaseName}`;
+    const storagePath = `media/${type}/${safeName}`;
+    const storageRef = ref(storage, storagePath);
+
+    setUploadToast(
+      `Menyiapkan ${index}/${total}: ${preparedFile.name}` +
+      (isPhoto && preparedFile.size < originalSize
+        ? ` • ${formatBytes(originalSize)} → ${formatBytes(preparedFile.size)}`
+        : "")
+    );
+
+    const url = await uploadFileToStorage(
+      storageRef,
+      preparedFile,
+      percent => {
+        setUploadToast(
+          `Mengunggah ${index}/${total}: ${preparedFile.name} • ${percent}%`
+        );
+      }
+    );
+
+    await addDoc(collection(db, "media"), {
+      name: file.name,
+      url,
+      type,
+      storagePath,
+      size: preparedFile.size,
+      originalSize,
+      contentType: preparedFile.type,
+      createdAt: serverTimestamp()
+    });
+
+    return { name: file.name, type };
+  }
+
+  async function runWithConcurrency(items, worker, limit) {
+    const results = new Array(items.length);
+    let nextIndex = 0;
+
+    async function runner() {
+      while (true) {
+        const index = nextIndex++;
+        if (index >= items.length) return;
+
+        try {
+          results[index] = await worker(items[index], index);
+        } catch (error) {
+          results[index] = { error, file: items[index] };
+        }
+      }
+    }
+
+    await Promise.all(
+      Array.from(
+        { length: Math.min(limit, items.length) },
+        () => runner()
+      )
+    );
+
+    return results;
+  }
+
+  mediaInput.addEventListener("change", async event => {
+    const files = [...event.target.files];
+    if (!files.length) return;
+
+    closeModal();
+    mediaInput.disabled = true;
+
+    const validFiles = files.filter(file => {
+      const validType =
+        file.type.startsWith("image/") || file.type.startsWith("video/");
+
+      if (!validType) {
+        alert(`${file.name} bukan foto/video yang valid.`);
+        return false;
+      }
+
+      if (file.size > MAX_FILE_SIZE) {
+        alert(`${file.name} melebihi batas ${formatBytes(MAX_FILE_SIZE)}.`);
+        return false;
+      }
+
+      return true;
+    });
+
+    if (!validFiles.length) {
+      mediaInput.value = "";
+      mediaInput.disabled = false;
+      return;
+    }
+
+    try {
+      setUploadToast(`Mengunggah ${validFiles.length} media…`);
+
+      const results = await runWithConcurrency(
+        validFiles,
+        (file, index) => uploadMedia(file, index + 1, validFiles.length),
+        MAX_PARALLEL_UPLOADS
+      );
+
+      const failed = results.filter(result => result?.error);
+      const successCount = results.length - failed.length;
+
+      if (failed.length) {
+        const names = failed.map(item => item.file.name).join(", ");
+        setUploadToast(`${successCount} berhasil • ${failed.length} gagal`);
+        alert(
+          `${successCount} media berhasil diunggah.\n\n` +
+          `Gagal: ${names}\n\n` +
+          `Detail error tersedia di Console browser (F12).`
+        );
+      } else {
+        setUploadToast(`${successCount} media berhasil diunggah ✓`);
+      }
+
+      await loadMedia();
+    } catch (error) {
+      console.error("Upload error:", error);
+      setUploadToast("Upload gagal");
+      alert(
+        "Upload gagal.\n\n" +
+        `${error?.message || error}\n\n` +
+        "Periksa Firebase Storage Rules, konfigurasi Firebase, dan koneksi internet."
+      );
+    } finally {
+      setTimeout(() => {
+        document.getElementById("uploadToast").style.display = "none";
+      }, 2200);
+
+      mediaInput.value = "";
+      mediaInput.disabled = false;
+    }
   });
 
   /*

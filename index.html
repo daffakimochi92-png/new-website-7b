@@ -8,7 +8,6 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
 
 <style>
 :root{
@@ -411,610 +410,292 @@ footer strong{color:var(--text);font-family:"Space Grotesk"}
 </div>
 
 <script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
-  import {
-    getFirestore,
-    collection,
-    addDoc,
-    deleteDoc,
-    doc,
-    getDocs,
-    query,
-    orderBy,
-    serverTimestamp
-  } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
-  import {
-    getStorage,
-    ref,
-    uploadBytesResumable,
-    getDownloadURL,
-    deleteObject
-  } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-storage.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
+import { getFirestore, collection, addDoc, deleteDoc, doc, getDocs, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+import { getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-storage.js";
 
-  /*
-    ============================================================
-    FIREBASE CONFIG
-    ============================================================
-    GANTI nilai di bawah dengan konfigurasi Web App Firebase kamu.
-    Firebase Console → Project settings → Your apps → Web app.
-  */
-  const firebaseConfig = {
-    apiKey: "GANTI_DENGAN_API_KEY",
-    authDomain: "GANTI_DENGAN_PROJECT_ID.firebaseapp.com",
-    projectId: "GANTI_DENGAN_PROJECT_ID",
-    storageBucket: "GANTI_DENGAN_STORAGE_BUCKET",
-    messagingSenderId: "GANTI_DENGAN_MESSAGING_SENDER_ID",
-    appId: "GANTI_DENGAN_APP_ID"
+/* ================= FIREBASE CONFIG =================
+   Isi dengan config Web App dari:
+   Firebase Console -> Project settings -> Your apps -> Web app
+*/
+const firebaseConfig = {
+  apiKey: "GANTI_DENGAN_API_KEY",
+  authDomain: "GANTI_DENGAN_PROJECT_ID.firebaseapp.com",
+  projectId: "GANTI_DENGAN_PROJECT_ID",
+  storageBucket: "GANTI_DENGAN_STORAGE_BUCKET",
+  messagingSenderId: "GANTI_DENGAN_MESSAGING_SENDER_ID",
+  appId: "GANTI_DENGAN_APP_ID"
+};
+
+const configIsPlaceholder = Object.values(firebaseConfig).some(v =>
+  !v || String(v).includes("GANTI_DENGAN") || String(v).includes("YOUR_") || String(v).includes("YOUR-")
+);
+
+const mediaInput = document.getElementById("mediaInput");
+const mediaGrid = document.getElementById("mediaGrid");
+const emptyState = document.getElementById("emptyState");
+const modal = document.getElementById("modal");
+const lightbox = document.getElementById("lightbox");
+const lightboxContent = document.getElementById("lightboxContent");
+const photoCount = document.getElementById("photoCount");
+const videoCount = document.getElementById("videoCount");
+const mediaCount = document.getElementById("mediaCount");
+const uploadToast = document.getElementById("uploadToast");
+
+function showToast(message, persistent = false) {
+  if (!uploadToast) return;
+  uploadToast.textContent = message;
+  uploadToast.style.display = "block";
+  clearTimeout(showToast.timer);
+  if (!persistent) showToast.timer = setTimeout(() => uploadToast.style.display = "none", 2500);
+}
+function hideToast() { if (uploadToast) uploadToast.style.display = "none"; }
+
+function friendlyFirebaseError(error) {
+  const code = error?.code || "";
+  const map = {
+    "storage/unauthorized": "Storage menolak upload. Periksa Storage Rules.",
+    "storage/permission-denied": "Storage menolak izin upload. Periksa Storage Rules.",
+    "storage/bucket-not-found": "Storage bucket tidak ditemukan. Periksa nilai storageBucket.",
+    "storage/project-not-found": "Project Firebase tidak ditemukan. Periksa Firebase Config.",
+    "storage/quota-exceeded": "Kuota Firebase Storage sudah habis.",
+    "storage/canceled": "Upload dibatalkan.",
+    "storage/retry-limit-exceeded": "Upload terlalu lama/koneksi terputus. Coba lagi.",
+    "permission-denied": "Firestore menolak akses. Periksa Firestore Security Rules.",
+    "failed-precondition": "Firestore belum siap atau membutuhkan konfigurasi/index.",
+    "unavailable": "Firebase tidak tersedia atau koneksi internet bermasalah."
   };
+  return `${map[code] || "Terjadi kesalahan Firebase."}\n\nKode: ${code || "tidak diketahui"}\nPesan: ${error?.message || "tidak ada pesan"}`;
+}
 
-  const firebaseConfigReady = Object.values(firebaseConfig).every(
-    value => value && !String(value).startsWith("GANTI_DENGAN_")
-  );
+if (configIsPlaceholder) {
+  showToast("Firebase belum dikonfigurasi", true);
+  const note = document.querySelector(".note");
+  if (note) note.innerHTML = "<strong style='color:#d92d20'>Firebase belum dikonfigurasi.</strong> Isi firebaseConfig dengan data Web App Firebase asli.";
+}
 
-  if (!firebaseConfigReady) {
-    console.error("Firebase belum dikonfigurasi:", firebaseConfig);
-    const warning = document.createElement("div");
-    warning.style.cssText =
-      "position:fixed;left:16px;right:16px;bottom:16px;z-index:9999;" +
-      "padding:15px 18px;background:#fff1f0;color:#b42318;" +
-      "border:1px solid #fecdca;border-radius:14px;font:600 13px system-ui;" +
-      "box-shadow:0 15px 40px rgba(0,0,0,.12)";
-    warning.textContent =
-      "Firebase belum dikonfigurasi. Isi firebaseConfig dengan konfigurasi Web App Firebase kamu.";
-    document.body.appendChild(warning);
+const app = configIsPlaceholder ? null : initializeApp(firebaseConfig);
+const db = app ? getFirestore(app) : null;
+const storage = app ? getStorage(app) : null;
+
+const uploadButtons = [
+  document.getElementById("uploadTopBtn"),
+  document.getElementById("heroUploadBtn"),
+  document.getElementById("videoUploadBtn")
+].filter(Boolean);
+
+function openModal() {
+  modal?.classList.add("show");
+  modal?.setAttribute("aria-hidden", "false");
+}
+function closeModal() {
+  modal?.classList.remove("show");
+  modal?.setAttribute("aria-hidden", "true");
+}
+uploadButtons.forEach(button => button.addEventListener("click", openModal));
+document.getElementById("closeModal")?.addEventListener("click", closeModal);
+modal?.addEventListener("click", e => { if (e.target === modal) closeModal(); });
+
+function createMediaCard(id, media) {
+  const article = document.createElement("article");
+  article.className = `media-card ${media.type}-card`;
+  article.dataset.type = media.type;
+  article.dataset.id = id;
+
+  const content = document.createElement("div");
+  content.className = "media-content";
+
+  if (media.type === "photo") {
+    const image = document.createElement("img");
+    image.src = media.url;
+    image.alt = media.name || "Dokumentasi 7B";
+    image.loading = "lazy";
+    image.addEventListener("click", () => openLightbox(image.src));
+    content.appendChild(image);
+  } else {
+    const video = document.createElement("video");
+    video.src = media.url;
+    video.controls = true;
+    video.preload = "metadata";
+    video.playsInline = true;
+    content.appendChild(video);
   }
 
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
-  const storage = getStorage(app);
+  const info = document.createElement("div");
+  info.className = "media-info";
+  const text = document.createElement("div");
+  const label = document.createElement("small");
+  label.textContent = media.type === "photo" ? "FOTO" : "VIDEO";
+  const title = document.createElement("h3");
+  title.textContent = media.name || "Dokumentasi 7B";
+  text.append(label, title);
 
-  const mediaInput = document.getElementById("mediaInput");
-  const mediaGrid = document.getElementById("mediaGrid");
-  const emptyState = document.getElementById("emptyState");
-  const modal = document.getElementById("modal");
-  const lightbox = document.getElementById("lightbox");
-  const lightboxContent = document.getElementById("lightboxContent");
-
-  const photoCount = document.getElementById("photoCount");
-  const videoCount = document.getElementById("videoCount");
-  const mediaCount = document.getElementById("mediaCount");
-
-  const uploadButtons = [
-    document.getElementById("uploadTopBtn"),
-    document.getElementById("heroUploadBtn"),
-    document.getElementById("videoUploadBtn")
-  ].filter(Boolean);
-
-  function openModal() {
-    modal.classList.add("show");
-    modal.setAttribute("aria-hidden", "false");
-  }
-
-  function closeModal() {
-    modal.classList.remove("show");
-    modal.setAttribute("aria-hidden", "true");
-  }
-
-  uploadButtons.forEach(button => {
-    button.addEventListener("click", openModal);
+  const del = document.createElement("button");
+  del.className = "delete-media";
+  del.type = "button";
+  del.textContent = "🗑";
+  del.title = "Hapus media";
+  del.addEventListener("click", async e => {
+    e.stopPropagation();
+    if (confirm("Yakin ingin menghapus media ini?")) await deleteMedia(id, media);
   });
 
-  document.getElementById("closeModal")?.addEventListener("click", closeModal);
+  info.append(text, del);
+  article.append(content, info);
+  mediaGrid.appendChild(article);
+}
 
-  modal?.addEventListener("click", event => {
-    if (event.target === modal) closeModal();
-  });
+async function loadMedia() {
+  if (!db) return;
+  try {
+    const q = query(collection(db, "media"), orderBy("createdAt", "desc"));
+    const snapshot = await getDocs(q);
+    document.querySelectorAll(".media-card.demo").forEach(card => card.remove());
 
-  /*
-    ============================================================
-    LOAD MEDIA
-    ============================================================
-    Semua browser mengambil koleksi "media" yang sama dari
-    Firestore. Karena itu upload pengguna lain akan terlihat
-    di perangkat lain juga.
-  */
-  async function loadMedia() {
-    try {
-      const mediaQuery = query(
-        collection(db, "media"),
-        orderBy("createdAt", "desc")
-      );
-
-      const snapshot = await getDocs(mediaQuery);
-
-      document.querySelectorAll(".media-card.demo").forEach(card => card.remove());
-
-      let photos = 0;
-      let videos = 0;
-
-      snapshot.forEach(mediaDoc => {
-        const media = mediaDoc.data();
-
-        if (media.type === "photo") photos++;
-        if (media.type === "video") videos++;
-
-        createMediaCard(mediaDoc.id, media);
-      });
-
-      photoCount.textContent = photos;
-      videoCount.textContent = videos;
-      mediaCount.textContent = photos + videos;
-      emptyState.hidden = snapshot.size !== 0;
-
-    } catch (error) {
-      console.error(error);
-      emptyState.hidden = false;
-      emptyState.querySelector("h3").textContent = "Gagal memuat media";
-      emptyState.querySelector("p").textContent =
-        "Periksa konfigurasi Firebase dan Security Rules.";
-    }
-  }
-
-  /*
-    ============================================================
-    CREATE CARD
-    ============================================================
-  */
-  function createMediaCard(id, media) {
-    const article = document.createElement("article");
-    article.className = `media-card ${media.type}-card`;
-    article.dataset.type = media.type;
-    article.dataset.id = id;
-
-    const content = document.createElement("div");
-    content.className = "media-content";
-
-    if (media.type === "photo") {
-      const image = document.createElement("img");
-      image.src = media.url;
-      image.alt = media.name || "Dokumentasi 7B";
-      image.loading = "lazy";
-      image.addEventListener("click", () => openLightbox(image.src));
-      content.appendChild(image);
-    } else {
-      const video = document.createElement("video");
-      video.src = media.url;
-      video.controls = true;
-      video.preload = "metadata";
-      content.appendChild(video);
-    }
-
-    const info = document.createElement("div");
-    info.className = "media-info";
-
-    const text = document.createElement("div");
-
-    const label = document.createElement("small");
-    label.textContent = media.type === "photo" ? "FOTO" : "VIDEO";
-
-    const title = document.createElement("h3");
-    title.textContent = media.name || "Dokumentasi 7B";
-
-    text.append(label, title);
-
-    const deleteButton = document.createElement("button");
-    deleteButton.className = "delete-media";
-    deleteButton.type = "button";
-    deleteButton.textContent = "🗑";
-    deleteButton.title = "Hapus media";
-
-    deleteButton.addEventListener("click", async event => {
-      event.stopPropagation();
-
-      if (!confirm("Yakin ingin menghapus media ini?")) return;
-
-      await deleteMedia(id, media);
+    let photos = 0, videos = 0;
+    snapshot.forEach(mediaDoc => {
+      const media = mediaDoc.data();
+      if (media.type === "photo") photos++;
+      if (media.type === "video") videos++;
+      createMediaCard(mediaDoc.id, media);
     });
 
-    info.append(text, deleteButton);
-    article.append(content, info);
-    mediaGrid.appendChild(article);
+    photoCount.textContent = photos;
+    videoCount.textContent = videos;
+    mediaCount.textContent = photos + videos;
+    emptyState.hidden = snapshot.size !== 0;
+  } catch (error) {
+    console.error("LOAD FIREBASE ERROR:", error);
+    emptyState.hidden = false;
+    emptyState.querySelector("h3").textContent = "Gagal memuat media";
+    emptyState.querySelector("p").textContent = "Periksa Firebase Config dan Firestore Rules.";
   }
+}
 
-  /*
-    ============================================================
-    UPLOAD
-    ============================================================
-  */
-  mediaInput.addEventListener("change", async event => {
-    const files = [...event.target.files];
-
-    if (!files.length) return;
-
-    closeModal();
-
-    const uploadToast = document.getElementById("uploadToast");
-    uploadToast.style.display = "block";
-
-    for (const file of files) {
-      uploadToast.textContent = `Mengunggah ${file.name}…`;
-      await uploadMedia(file);
-    }
-
-    uploadToast.textContent = "Semua media berhasil diunggah ✓";
-    setTimeout(() => uploadToast.style.display = "none", 1800);
-
-    mediaInput.value = "";
-    await loadMedia();
-  });
-
-  async function uploadMedia(file) {
-    const isPhoto = file.type.startsWith("image/");
-    const isVideo = file.type.startsWith("video/");
-
-    if (!isPhoto && !isVideo) {
-      alert(`${file.name} bukan foto/video yang valid.`);
-      return;
-    }
-
-    // Batas contoh 100 MB per file.
-    if (file.size > 100 * 1024 * 1024) {
-      alert(`${file.name} lebih dari 100 MB.`);
-      return;
-    }
-
-    try {
-      const type = isPhoto ? "photo" : "video";
-
-      const safeName =
-        `${Date.now()}_${crypto.randomUUID()}_${file.name}`;
-
-      const storagePath = `media/${type}/${safeName}`;
-      const storageRef = ref(storage, storagePath);
-
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
-
-      await addDoc(collection(db, "media"), {
-        name: file.name,
-        url,
-        type,
-        storagePath,
-        createdAt: serverTimestamp()
-      });
-
-    } catch (error) {
-      console.error(error);
-      alert(`Upload "${file.name}" gagal. Periksa Firebase Storage Rules.`);
-    }
-  }
-
-  /*
-    ============================================================
-    DELETE
-    ============================================================
-    Catatan: pada versi ini siapa pun yang memiliki akses write
-    dapat menghapus. Untuk website publik, sebaiknya tambahkan
-    Firebase Authentication/admin sebelum dipakai serius.
-  */
-  async function deleteMedia(id, media) {
-    try {
-      if (media.storagePath) {
-        const storageRef = ref(storage, media.storagePath);
-
-        try {
-          await deleteObject(storageRef);
-        } catch (storageError) {
-          console.warn("File Storage tidak ditemukan:", storageError);
-        }
+function uploadFile(storageRef, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const task = uploadBytesResumable(storageRef, file, {
+      contentType: file.type || "application/octet-stream",
+      cacheControl: "public,max-age=31536000"
+    });
+    task.on("state_changed",
+      snapshot => onProgress(Math.round(snapshot.bytesTransferred / snapshot.totalBytes * 100)),
+      reject,
+      async () => {
+        try { resolve(await getDownloadURL(task.snapshot.ref)); }
+        catch (error) { reject(error); }
       }
-
-      await deleteDoc(doc(db, "media", id));
-      await loadMedia();
-
-    } catch (error) {
-      console.error(error);
-      alert("Media gagal dihapus. Periksa Firebase Security Rules.");
-    }
-  }
-
-  /*
-    ============================================================
-    LIGHTBOX
-    ============================================================
-  */
-  function openLightbox(url) {
-    lightboxContent.innerHTML = "";
-
-    const image = document.createElement("img");
-    image.src = url;
-    image.alt = "Dokumentasi 7B";
-
-    lightboxContent.appendChild(image);
-    lightbox.classList.add("show");
-    lightbox.setAttribute("aria-hidden", "false");
-  }
-
-  function closeLightbox() {
-    lightbox.classList.remove("show");
-    lightbox.setAttribute("aria-hidden", "true");
-    lightboxContent.innerHTML = "";
-  }
-
-  document.getElementById("closeLightbox")?.addEventListener(
-    "click",
-    closeLightbox
-  );
-
-  lightbox?.addEventListener("click", event => {
-    if (event.target === lightbox) closeLightbox();
+    );
   });
+}
 
-  /*
-     ============================================================
-     UPLOAD — VERSI DIPERBAIKI
-     ============================================================
-     - uploadBytesResumable: lebih stabil untuk file besar.
-     - Foto otomatis diperkecil/dikompres di browser.
-     - Maksimal 3 upload berjalan bersamaan.
-     - Progress upload ditampilkan.
-  */
+async function uploadOne(file, index, total) {
+  if (!db || !storage) throw new Error("Firebase belum dikonfigurasi.");
+  const isPhoto = file.type.startsWith("image/");
+  const isVideo = file.type.startsWith("video/");
+  if (!isPhoto && !isVideo) throw new Error(`"${file.name}" bukan foto/video yang valid.`);
 
   const MAX_FILE_SIZE = 200 * 1024 * 1024;
-  const MAX_IMAGE_DIMENSION = 1920;
-  const IMAGE_QUALITY = 0.82;
-  const MAX_PARALLEL_UPLOADS = 3;
+  if (file.size > MAX_FILE_SIZE) throw new Error(`"${file.name}" lebih besar dari 200 MB.`);
 
-  function formatBytes(bytes) {
-    if (!bytes) return "0 B";
-    const units = ["B", "KB", "MB", "GB"];
-    const i = Math.min(
-      units.length - 1,
-      Math.floor(Math.log(bytes) / Math.log(1024))
-    );
-    return `${(bytes / Math.pow(1024, i)).toFixed(i ? 1 : 0)} ${units[i]}`;
+  const type = isPhoto ? "photo" : "video";
+  const cleanName = file.name.replace(/[^\w.\-() ]/g, "_");
+  const uniqueName = `${Date.now()}_${crypto.randomUUID()}_${cleanName}`;
+  const storagePath = `media/${type}/${uniqueName}`;
+  const storageRef = ref(storage, storagePath);
+
+  showToast(`Mengunggah ${index}/${total}: 0%`, true);
+  const url = await uploadFile(storageRef, file, percent => {
+    showToast(`Mengunggah ${index}/${total}: ${percent}%`, true);
+  });
+
+  await addDoc(collection(db, "media"), {
+    name: file.name,
+    url,
+    type,
+    storagePath,
+    size: file.size,
+    contentType: file.type || "application/octet-stream",
+    createdAt: serverTimestamp()
+  });
+}
+
+mediaInput?.addEventListener("change", async e => {
+  const files = [...e.target.files];
+  if (!files.length) return;
+
+  if (configIsPlaceholder) {
+    alert("Upload belum bisa dilakukan karena Firebase Config masih berupa placeholder.\n\nIsi firebaseConfig dengan konfigurasi Web App Firebase asli.");
+    mediaInput.value = "";
+    return;
   }
 
-  function setUploadToast(text) {
-    const toast = document.getElementById("uploadToast");
-    toast.style.display = "block";
-    toast.textContent = text;
-  }
+  closeModal();
+  let success = 0, failed = 0;
 
-  async function compressImage(file) {
-    if (!file.type.startsWith("image/")) return file;
-    if (file.type === "image/gif" || file.type === "image/svg+xml") return file;
-
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(
-      1,
-      MAX_IMAGE_DIMENSION / bitmap.width,
-      MAX_IMAGE_DIMENSION / bitmap.height
-    );
-
-    if (scale === 1 && file.size <= 1.5 * 1024 * 1024) {
-      bitmap.close();
-      return file;
-    }
-
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-
-    const ctx = canvas.getContext("2d", { alpha: false });
-    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    bitmap.close();
-
-    const blob = await new Promise(resolve =>
-      canvas.toBlob(resolve, "image/jpeg", IMAGE_QUALITY)
-    );
-
-    if (!blob) return file;
-
-    return new File(
-      [blob],
-      file.name.replace(/\.[^.]+$/, "") + ".jpg",
-      { type: "image/jpeg", lastModified: Date.now() }
-    );
-  }
-
-  function uploadFileToStorage(storageRef, file, onProgress) {
-    return new Promise((resolve, reject) => {
-      const task = uploadBytesResumable(storageRef, file, {
-        contentType: file.type,
-        cacheControl: "public,max-age=31536000,immutable"
-      });
-
-      task.on(
-        "state_changed",
-        snapshot => {
-          const percent = Math.round(
-            (snapshot.bytesTransferred / snapshot.totalBytes) * 100
-          );
-          onProgress(percent);
-        },
-        reject,
-        async () => {
-          try {
-            resolve(await getDownloadURL(task.snapshot.ref));
-          } catch (error) {
-            reject(error);
-          }
-        }
-      );
-    });
-  }
-
-  async function uploadMedia(file, index, total) {
-    const isPhoto = file.type.startsWith("image/");
-    const isVideo = file.type.startsWith("video/");
-
-    if (!isPhoto && !isVideo) {
-      throw new Error(`${file.name} bukan foto/video yang valid.`);
-    }
-
-    if (file.size > MAX_FILE_SIZE) {
-      throw new Error(`${file.name} melebihi batas ${formatBytes(MAX_FILE_SIZE)}.`);
-    }
-
-    const originalSize = file.size;
-    const preparedFile = isPhoto ? await compressImage(file) : file;
-    const type = isPhoto ? "photo" : "video";
-
-    const safeBaseName = preparedFile.name
-      .replace(/[^\w.\- ]+/g, "_")
-      .replace(/\s+/g, "_");
-
-    const safeName = `${Date.now()}_${crypto.randomUUID()}_${safeBaseName}`;
-    const storagePath = `media/${type}/${safeName}`;
-    const storageRef = ref(storage, storagePath);
-
-    setUploadToast(
-      `Menyiapkan ${index}/${total}: ${preparedFile.name}` +
-      (isPhoto && preparedFile.size < originalSize
-        ? ` • ${formatBytes(originalSize)} → ${formatBytes(preparedFile.size)}`
-        : "")
-    );
-
-    const url = await uploadFileToStorage(
-      storageRef,
-      preparedFile,
-      percent => {
-        setUploadToast(
-          `Mengunggah ${index}/${total}: ${preparedFile.name} • ${percent}%`
-        );
-      }
-    );
-
-    await addDoc(collection(db, "media"), {
-      name: file.name,
-      url,
-      type,
-      storagePath,
-      size: preparedFile.size,
-      originalSize,
-      contentType: preparedFile.type,
-      createdAt: serverTimestamp()
-    });
-
-    return { name: file.name, type };
-  }
-
-  async function runWithConcurrency(items, worker, limit) {
-    const results = new Array(items.length);
-    let nextIndex = 0;
-
-    async function runner() {
-      while (true) {
-        const index = nextIndex++;
-        if (index >= items.length) return;
-
-        try {
-          results[index] = await worker(items[index], index);
-        } catch (error) {
-          results[index] = { error, file: items[index] };
-        }
-      }
-    }
-
-    await Promise.all(
-      Array.from(
-        { length: Math.min(limit, items.length) },
-        () => runner()
-      )
-    );
-
-    return results;
-  }
-
-  mediaInput.addEventListener("change", async event => {
-    const files = [...event.target.files];
-    if (!files.length) return;
-
-    closeModal();
-    mediaInput.disabled = true;
-
-    const validFiles = files.filter(file => {
-      const validType =
-        file.type.startsWith("image/") || file.type.startsWith("video/");
-
-      if (!validType) {
-        alert(`${file.name} bukan foto/video yang valid.`);
-        return false;
-      }
-
-      if (file.size > MAX_FILE_SIZE) {
-        alert(`${file.name} melebihi batas ${formatBytes(MAX_FILE_SIZE)}.`);
-        return false;
-      }
-
-      return true;
-    });
-
-    if (!validFiles.length) {
-      mediaInput.value = "";
-      mediaInput.disabled = false;
-      return;
-    }
-
+  for (let i = 0; i < files.length; i++) {
     try {
-      setUploadToast(`Mengunggah ${validFiles.length} media…`);
-
-      const results = await runWithConcurrency(
-        validFiles,
-        (file, index) => uploadMedia(file, index + 1, validFiles.length),
-        MAX_PARALLEL_UPLOADS
-      );
-
-      const failed = results.filter(result => result?.error);
-      const successCount = results.length - failed.length;
-
-      if (failed.length) {
-        const names = failed.map(item => item.file.name).join(", ");
-        setUploadToast(`${successCount} berhasil • ${failed.length} gagal`);
-        alert(
-          `${successCount} media berhasil diunggah.\n\n` +
-          `Gagal: ${names}\n\n` +
-          `Detail error tersedia di Console browser (F12).`
-        );
-      } else {
-        setUploadToast(`${successCount} media berhasil diunggah ✓`);
-      }
-
-      await loadMedia();
+      await uploadOne(files[i], i + 1, files.length);
+      success++;
     } catch (error) {
-      console.error("Upload error:", error);
-      setUploadToast("Upload gagal");
-      alert(
-        "Upload gagal.\n\n" +
-        `${error?.message || error}\n\n` +
-        "Periksa Firebase Storage Rules, konfigurasi Firebase, dan koneksi internet."
-      );
-    } finally {
-      setTimeout(() => {
-        document.getElementById("uploadToast").style.display = "none";
-      }, 2200);
-
-      mediaInput.value = "";
-      mediaInput.disabled = false;
+      failed++;
+      console.error(`UPLOAD ERROR: ${files[i].name}`, error);
+      alert(`Upload "${files[i].name}" gagal.\n\n${friendlyFirebaseError(error)}`);
     }
-  });
+  }
 
-  /*
-    ============================================================
-    FILTER
-    ============================================================
-  */
-  document.querySelectorAll(".filter").forEach(button => {
-    button.addEventListener("click", () => {
-      document.querySelectorAll(".filter")
-        .forEach(btn => btn.classList.remove("active"));
+  if (success) {
+    showToast(failed ? `${success} berhasil, ${failed} gagal` : `${success} media berhasil diunggah ✓`);
+    await loadMedia();
+  } else hideToast();
 
-      button.classList.add("active");
+  mediaInput.value = "";
+});
 
-      const filter = button.dataset.filter;
+async function deleteMedia(id, media) {
+  if (!db || !storage) return alert("Firebase belum dikonfigurasi.");
+  try {
+    if (media.storagePath) {
+      try { await deleteObject(ref(storage, media.storagePath)); }
+      catch (e) { console.warn("Storage delete warning:", e); }
+    }
+    await deleteDoc(doc(db, "media", id));
+    await loadMedia();
+  } catch (error) {
+    console.error("DELETE ERROR:", error);
+    alert(`Media gagal dihapus.\n\n${friendlyFirebaseError(error)}`);
+  }
+}
 
-      document.querySelectorAll(".media-card").forEach(card => {
-        card.style.display =
-          filter === "all" || card.dataset.type === filter
-            ? ""
-            : "none";
-      });
+function openLightbox(url) {
+  lightboxContent.innerHTML = "";
+  const image = document.createElement("img");
+  image.src = url;
+  image.alt = "Dokumentasi 7B";
+  lightboxContent.appendChild(image);
+  lightbox.classList.add("show");
+  lightbox.setAttribute("aria-hidden", "false");
+}
+function closeLightbox() {
+  lightbox.classList.remove("show");
+  lightbox.setAttribute("aria-hidden", "true");
+  lightboxContent.innerHTML = "";
+}
+document.getElementById("closeLightbox")?.addEventListener("click", closeLightbox);
+lightbox?.addEventListener("click", e => { if (e.target === lightbox) closeLightbox(); });
+
+document.querySelectorAll(".filter").forEach(button => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll(".filter").forEach(b => b.classList.remove("active"));
+    button.classList.add("active");
+    const filter = button.dataset.filter;
+    document.querySelectorAll(".media-card").forEach(card => {
+      card.style.display = filter === "all" || card.dataset.type === filter ? "" : "none";
     });
   });
+});
 
-  // Jalankan saat website dibuka.
-  loadMedia();
+loadMedia();
 </script>
 </body>
 </html>
